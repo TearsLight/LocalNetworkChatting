@@ -1,0 +1,12 @@
+{
+  "name": "chatbox",
+  "version": "1.0.0",
+  "description": "base websocket chat server",
+  "main": "server.js",
+  "scripts": {
+    "test": "node server.js",
+    "start": "node server.js"
+  },
+  "author": "cherry",
+  "license": "ISC"
+}

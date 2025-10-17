@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket 聊天室</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" href="assets/favicon.ico" type="image/x-icon">
+</head>
+<body>
+    <div class="container">
+        <div class="login-screen" id="loginScreen">
+            <div class="login-title">💬 聊天室</div>
+            <div class="login-subtitle">输入昵称加入聊天，留空则为匿名者</div>
+            <div class="login-form">
+                <div class="input-group">
+                    <label for="nicknameInput">昵称 (可选)</label>
+                    <input 
+                        type="text" 
+                        id="nicknameInput" 
+                        placeholder="留空则为 Anonymous" 
+                        maxlength="20"
+                        autocomplete="off"
+                    >
+                </div>
+                <div class="input-group">
+                    <label for="serverInput">服务器地址</label>
+                    <input 
+                        type="text" 
+                        id="serverInput" 
+                        value="ws://192.168.193.42:9090" 
+                        placeholder="ws://192.168.193.42:9090"
+                        readonly
+                        style="opacity: 0.7;"
+                    >
+                </div>
+                <div id="errorMsg" class="error-message" style="display: none;"></div>
+                <button class="join-btn" id="joinBtn">加入聊天室</button>
+            </div>
+        </div>
+        <div class="chat-screen" id="chatScreen">
+            <div class="chat-header">
+                <div class="chat-title">💬 聊天室</div>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <div class="connection-status" id="connectionStatus">连接中...</div>
+                    <div class="online-count" id="onlineCount">👥 0 人在线</div>
+                </div>
+            </div>
+
+            <div class="messages-container" id="messagesContainer"></div>
+
+            <div class="input-area">
+                <input 
+                    type="text" 
+                    class="message-input" 
+                    id="messageInput" 
+                    placeholder="输入消息..."
+                    maxlength="500"
+                    autocomplete="off"
+                >
+                <button class="send-btn" id="sendBtn">发送</button>
+            </div>
+        </div>
+    </div>
+    <video class="bg-video" autoplay muted loop playsinline>
+        <source src="assets/backgroundVideo.mp4" type="video/mp4">
+    </video>
+    <script src="js/script.js"></script>
+</body>
+</html>

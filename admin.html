@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>聊天室管理面板</title>
+    <title>管理面板</title>
+    <link rel="icon" href="/assets/favicon.ico" type="image/png">
     <style>
         * {
             margin: 0;
@@ -251,7 +252,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>📊 聊天室管理面板</h1>
+        <h1>聊天室管理面板</h1>
 
         <!-- 统计卡片 -->
         <div class="stats-grid" id="statsGrid">
@@ -277,18 +278,16 @@
             </div>
         </div>
 
-        <!-- 标签页 -->
         <div class="tabs">
-            <button class="tab active" onclick="switchTab('topUsers')">👑 活跃用户</button>
-            <button class="tab" onclick="switchTab('recentMessages')">💬 最近消息</button>
-            <button class="tab" onclick="switchTab('search')">🔍 搜索消息</button>
+            <button class="tab active" onclick="switchTab('topUsers')">活跃用户</button>
+            <button class="tab" onclick="switchTab('recentMessages')">最近消息</button>
+            <button class="tab" onclick="switchTab('search')">搜索消息</button>
         </div>
 
-        <!-- 活跃用户面板 -->
         <div class="panel tab-content active" id="topUsers">
             <div class="panel-header">
-                <div class="panel-title">👑 活跃用户排行</div>
-                <button class="refresh-btn" onclick="loadStats()">🔄 刷新</button>
+                <div class="panel-title">活跃用户排行</div>
+                <button class="refresh-btn" onclick="loadStats()">刷新</button>
             </div>
             <table>
                 <thead>
@@ -304,22 +303,18 @@
                 </tbody>
             </table>
         </div>
-
-        <!-- 最近消息面板 -->
         <div class="panel tab-content" id="recentMessages">
             <div class="panel-header">
-                <div class="panel-title">💬 最近消息</div>
-                <button class="refresh-btn" onclick="loadMessages()">🔄 刷新</button>
+                <div class="panel-title">最近消息</div>
+                <button class="refresh-btn" onclick="loadMessages()">刷新</button>
             </div>
             <div id="messagesContainer">
                 <div class="loading">加载中...</div>
             </div>
         </div>
-
-        <!-- 搜索面板 -->
         <div class="panel tab-content" id="search">
             <div class="panel-header">
-                <div class="panel-title">🔍 搜索消息</div>
+                <div class="panel-title">搜索消息</div>
             </div>
             <div class="search-box">
                 <input type="text" class="search-input" id="searchInput" placeholder="输入关键词搜索...">
@@ -334,31 +329,24 @@
     <script>
         let currentTab = 'topUsers';
 
-        // 切换标签页
         function switchTab(tabName) {
             currentTab = tabName;
             
-            // 更新标签按钮状态
             document.querySelectorAll('.tab').forEach(tab => {
                 tab.classList.remove('active');
             });
             event.target.classList.add('active');
             
-            // 更新内容显示
             document.querySelectorAll('.tab-content').forEach(content => {
                 content.classList.remove('active');
             });
             document.getElementById(tabName).classList.add('active');
-            
-            // 加载对应数据
             if (tabName === 'topUsers') {
                 loadStats();
             } else if (tabName === 'recentMessages') {
                 loadMessages();
             }
         }
-
-        // 加载统计信息
         async function loadStats() {
             try {
                 const response = await fetch('/api/stats');
@@ -367,13 +355,11 @@
                 if (result.success) {
                     const data = result.data;
                     
-                    // 更新统计卡片
                     document.getElementById('totalUsers').textContent = data.totalUsers;
                     document.getElementById('totalMessages').textContent = data.totalMessages;
                     document.getElementById('totalSessions').textContent = data.totalSessions;
                     document.getElementById('todayMessages').textContent = data.todayMessages;
                     
-                    // 更新活跃用户表格
                     const tbody = document.getElementById('topUsersTable');
                     if (data.topUsers && data.topUsers.length > 0) {
                         tbody.innerHTML = data.topUsers.map((user, index) => `
@@ -396,8 +382,6 @@
                 showError('加载统计信息失败');
             }
         }
-
-        // 加载最近消息
         async function loadMessages(limit = 50) {
             try {
                 const response = await fetch(`/api/messages?limit=${limit}`);
@@ -425,8 +409,6 @@
                 showError('加载消息失败');
             }
         }
-
-        // 搜索消息
         async function searchMessages() {
             const keyword = document.getElementById('searchInput').value.trim();
             const container = document.getElementById('searchResults');
@@ -466,28 +448,23 @@
                 container.innerHTML = '<div class="error">搜索失败，请稍后重试</div>';
             }
         }
-
-        // 回车搜索
         document.getElementById('searchInput').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
                 searchMessages();
             }
         });
 
-        // 高亮关键词
         function highlightKeyword(text, keyword) {
             const regex = new RegExp(`(${keyword})`, 'gi');
             return text.replace(regex, '<mark style="background: #ffeb3b; padding: 2px 4px; border-radius: 3px;">$1</mark>');
         }
 
-        // HTML 转义
         function escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
         }
 
-        // 显示错误
         function showError(message) {
             const error = document.createElement('div');
             error.className = 'error';
@@ -497,12 +474,9 @@
             setTimeout(() => error.remove(), 5000);
         }
 
-        // 页面加载时初始化
         window.addEventListener('load', () => {
             loadStats();
         });
-
-        // 自动刷新（每30秒）
         setInterval(() => {
             if (currentTab === 'topUsers') {
                 loadStats();

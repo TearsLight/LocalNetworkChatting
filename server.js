@@ -3,13 +3,9 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const Database = require('./database');
-
-// 初始化数据库
 const db = new Database('./chat.db');
-
 const clients = new Map();
 let clientIdCounter = 0;
-
 const mimeTypes = {
     '.html': 'text/html',
     '.css': 'text/css',
@@ -46,7 +42,7 @@ function startHeartbeat(client) {
     }, HEARTBEAT_INTERVAL);
 }
 
-// ========== WebSocket 升级 ==========
+// ========== WebSocket ==========
 function handleWebSocketUpgrade(req, socket) {
     const key = req.headers['sec-websocket-key'];
     if (!key) {
@@ -89,8 +85,6 @@ function handleWebSocketUpgrade(req, socket) {
 
     clients.set(clientId, client);
     console.log(`[${getTime()}] Client ${clientId} connected from ${clientIP} (Online: ${clients.size})`);
-
-    // 记录系统日志
     db.logSystem('connection', `Client ${clientId} connected`, clientIP).catch(console.error);
 
     startHeartbeat(client);
@@ -151,7 +145,6 @@ async function removeClient(client) {
     
     const nickname = client.nickname;
     
-    // 结束数据库会话
     if (client.sessionId) {
         try {
             await db.endSession(client.sessionId);
@@ -160,7 +153,6 @@ async function removeClient(client) {
         }
     }
     
-    // 记录系统日志
     db.logSystem('disconnection', `${nickname} disconnected`, client.ip).catch(console.error);
     
     clients.delete(client.id);
@@ -249,14 +241,10 @@ async function handleMessage(client, data) {
         console.log(`[${getTime()}] ${client.nickname} (${client.ip}) joined (Online: ${clients.size})`);
         
         try {
-            // 查找或创建用户
             const user = await db.findOrCreateUser(client.nickname, client.ip);
             client.userId = user.id;
             
-            // 创建新会话
             client.sessionId = await db.createSession(user.id, client.nickname, client.ip);
-            
-            // 保存系统消息到数据库
             await db.saveMessage(
                 client.sessionId,
                 'System',
@@ -275,7 +263,6 @@ async function handleMessage(client, data) {
             online_count: clients.size
         });
         
-        // 发送历史消息给新用户
         try {
             const history = await db.getRecentMessages(20);
             const historyFrame = createFrame(JSON.stringify({
@@ -294,7 +281,6 @@ async function handleMessage(client, data) {
         if (content) {
             console.log(`[${getTime()}] ${client.nickname}: ${content}`);
             
-            // 保存消息到数据库
             try {
                 await db.saveMessage(
                     client.sessionId,
@@ -304,7 +290,6 @@ async function handleMessage(client, data) {
                     'user'
                 );
                 
-                // 更新用户消息计数
                 if (client.userId) {
                     await db.incrementUserMessages(client.userId);
                 }
@@ -325,7 +310,6 @@ async function handleMessage(client, data) {
         console.log(`[${getTime()}] ${client.nickname} requested disconnect`);
         client.socket.end();
     } else if (data.type === 'get_stats') {
-        // 获取统计信息
         try {
             const stats = await db.getStatistics();
             const topUsers = await db.getTopUsers(5);
@@ -402,11 +386,10 @@ function serveStaticFile(req, res, filePath) {
     });
 }
 
-// ========== HTTP API 端点 ==========
+// ========== HTTP API ==========
 async function handleApiRequest(req, res) {
     const url = req.url;
     
-    // 设置 CORS
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Content-Type', 'application/json');
     
@@ -469,12 +452,6 @@ server.listen(PORT, HOST, () => {
     console.log(`HTTP Server: http://${HOST}:${PORT}`);
     console.log(`WebSocket:  ws://${HOST}:${PORT}`);
     console.log('='.repeat(50));
-    console.log('Static assets available at:');
-    console.log(`  - /chat.html`);
-    console.log(`  - /css/style.css`);
-    console.log(`  - /js/script.js`);
-    console.log(`  - /assets/backgroundVideo.mp4`);
-    console.log('='.repeat(50));
     console.log('API Endpoints:');
     console.log(`  - GET /api/stats`);
     console.log(`  - GET /api/messages?limit=50`);
@@ -486,7 +463,6 @@ server.listen(PORT, HOST, () => {
 process.on('SIGINT', async () => {
     console.log('\n\nShutting down server...');
     
-    // 关闭所有客户端连接
     for (const client of clients.values()) {
         if (client.sessionId) {
             await db.endSession(client.sessionId).catch(console.error);
@@ -494,7 +470,6 @@ process.on('SIGINT', async () => {
         client.socket.end();
     }
     
-    // 关闭数据库
     await db.close();
     
     server.close();

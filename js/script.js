@@ -27,12 +27,9 @@ nicknameInput.addEventListener('keypress', (e) => {
 
 disconnectBtn.addEventListener('click', () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
-        // 发送断开消息
         ws.send(JSON.stringify({ type: 'disconnect' }));
         stopHeartbeat();
         ws.close();
-        
-        // 重置界面
         chatScreen.classList.remove('active');
         loginScreen.classList.remove('hidden');
         messagesContainer.innerHTML = '';
@@ -116,14 +113,14 @@ function connectToServer() {
 
 // ========== 保活机制 ==========
 function startHeartbeat() {
-    stopHeartbeat(); // 确保没有重复的定时器
+    stopHeartbeat();
     
     heartbeatInterval = setInterval(() => {
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'heartbeat' }));
             console.log('发送心跳');
         }
-    }, 25000); // 每25秒发送一次心跳
+    }, 25000);
 }
 
 function stopHeartbeat() {
@@ -169,8 +166,7 @@ function handleMessage(data) {
         updateUserList(data.users);
         onlineCount.textContent = `👥 ${data.count} 人在线`;
     } else if (data.type === 'history') {
-        // 加载历史消息
-        addSystemMessage('📜 加载历史消息...');
+        addSystemMessage('加载历史消息...');
         data.messages.forEach(msg => {
             if (msg.message_type === 'system') {
                 addSystemMessage(msg.message);
@@ -178,9 +174,8 @@ function handleMessage(data) {
                 addUserMessage(msg.nickname, msg.message, msg.time);
             }
         });
-        addSystemMessage('📜 历史消息加载完成');
+        addSystemMessage('历史消息加载完成');
     } else if (data.type === 'stats') {
-        // 显示统计信息
         console.log('统计信息:', data.data);
     }
 }
@@ -206,8 +201,8 @@ function updateUserList(users) {
                 <span class="user-id">#${user.id}</span>
             </div>
             <div class="user-info">
-                <div class="user-ip">🌐 ${escapeHtml(user.ip)}</div>
-                <div class="user-time">🕐 ${timeStr}</div>
+                <div class="user-ip">${escapeHtml(user.ip)}</div>
+                <div class="user-time">${timeStr}</div>
             </div>
         `;
         
@@ -263,7 +258,6 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// 页面卸载时清理
 window.addEventListener('beforeunload', () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'disconnect' }));

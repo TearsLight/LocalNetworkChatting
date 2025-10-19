@@ -7,15 +7,12 @@ class Database {
             if (err) {
                 console.error('数据库连接失败:', err.message);
             } else {
-                console.log('✅ SQLite 数据库连接成功');
+                console.log('SQLite 数据库连接成功');
                 this.initTables();
             }
         });
     }
-
-    // 初始化数据库表
     initTables() {
-        // 用户表
         this.db.run(`
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -28,8 +25,6 @@ class Database {
         `, (err) => {
             if (err) console.error('创建 users 表失败:', err);
         });
-
-        // 会话表（每次连接的记录）
         this.db.run(`
             CREATE TABLE IF NOT EXISTS sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,7 +40,6 @@ class Database {
             if (err) console.error('创建 sessions 表失败:', err);
         });
 
-        // 消息表
         this.db.run(`
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -61,7 +55,6 @@ class Database {
             if (err) console.error('创建 messages 表失败:', err);
         });
 
-        // 系统日志表
         this.db.run(`
             CREATE TABLE IF NOT EXISTS system_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -77,12 +70,9 @@ class Database {
         console.log('✅ 数据库表初始化完成');
     }
 
-    // ========== 用户相关 ==========
-    
-    // 查找或创建用户
+// ========== 用户 ==========
     findOrCreateUser(nickname, ipAddress) {
         return new Promise((resolve, reject) => {
-            // 先查找用户
             this.db.get(
                 'SELECT * FROM users WHERE nickname = ? ORDER BY last_seen DESC LIMIT 1',
                 [nickname],
@@ -93,14 +83,12 @@ class Database {
                     }
 
                     if (row) {
-                        // 更新最后在线时间
                         this.db.run(
                             'UPDATE users SET last_seen = CURRENT_TIMESTAMP WHERE id = ?',
                             [row.id]
                         );
                         resolve(row);
                     } else {
-                        // 创建新用户
                         this.db.run(
                             'INSERT INTO users (nickname, ip_address) VALUES (?, ?)',
                             [nickname, ipAddress],
@@ -117,8 +105,6 @@ class Database {
             );
         });
     }
-
-    // 更新用户消息计数
     incrementUserMessages(userId) {
         return new Promise((resolve, reject) => {
             this.db.run(
@@ -132,9 +118,8 @@ class Database {
         });
     }
 
-    // ========== 会话相关 ==========
+// ========== 会话 ==========
     
-    // 创建新会话
     createSession(userId, nickname, ipAddress) {
         return new Promise((resolve, reject) => {
             this.db.run(
@@ -148,7 +133,6 @@ class Database {
         });
     }
 
-    // 结束会话
     endSession(sessionId) {
         return new Promise((resolve, reject) => {
             this.db.run(
@@ -165,9 +149,7 @@ class Database {
         });
     }
 
-    // ========== 消息相关 ==========
-    
-    // 保存消息
+// ========== 消息相关 ==========
     saveMessage(sessionId, nickname, ipAddress, message, messageType = 'user') {
         return new Promise((resolve, reject) => {
             this.db.run(
@@ -180,8 +162,6 @@ class Database {
             );
         });
     }
-
-    // 获取最近的消息（用于新用户加载历史记录）
     getRecentMessages(limit = 50) {
         return new Promise((resolve, reject) => {
             this.db.all(
@@ -193,13 +173,11 @@ class Database {
                 [limit],
                 (err, rows) => {
                     if (err) reject(err);
-                    else resolve(rows.reverse()); // 反转顺序，让最早的消息在前
+                    else resolve(rows.reverse());
                 }
             );
         });
     }
-
-    // 按日期范围获取消息
     getMessagesByDateRange(startDate, endDate) {
         return new Promise((resolve, reject) => {
             this.db.all(
@@ -215,7 +193,6 @@ class Database {
         });
     }
 
-    // 搜索消息
     searchMessages(keyword, limit = 100) {
         return new Promise((resolve, reject) => {
             this.db.all(
@@ -232,9 +209,8 @@ class Database {
         });
     }
 
-    // ========== 系统日志 ==========
+// ========== 系统日志 ==========
     
-    // 记录系统日志
     logSystem(logType, message, ipAddress = null) {
         return new Promise((resolve, reject) => {
             this.db.run(
@@ -247,37 +223,30 @@ class Database {
             );
         });
     }
-
-    // ========== 统计信息 ==========
-    
-    // 获取统计信息
+// ========== 统计信息 ==========
     getStatistics() {
         return new Promise((resolve, reject) => {
             const stats = {};
             
             Promise.all([
-                // 总用户数
                 new Promise((res, rej) => {
                     this.db.get('SELECT COUNT(*) as count FROM users', (err, row) => {
                         if (err) rej(err);
                         else res(row.count);
                     });
                 }),
-                // 总消息数
                 new Promise((res, rej) => {
                     this.db.get('SELECT COUNT(*) as count FROM messages', (err, row) => {
                         if (err) rej(err);
                         else res(row.count);
                     });
                 }),
-                // 总会话数
                 new Promise((res, rej) => {
                     this.db.get('SELECT COUNT(*) as count FROM sessions', (err, row) => {
                         if (err) rej(err);
                         else res(row.count);
                     });
                 }),
-                // 今天的消息数
                 new Promise((res, rej) => {
                     this.db.get(
                         'SELECT COUNT(*) as count FROM messages WHERE DATE(timestamp) = DATE("now")',
@@ -297,8 +266,6 @@ class Database {
             }).catch(reject);
         });
     }
-
-    // 获取活跃用户排行
     getTopUsers(limit = 10) {
         return new Promise((resolve, reject) => {
             this.db.all(
@@ -315,10 +282,6 @@ class Database {
             );
         });
     }
-
-    // ========== 清理和维护 ==========
-    
-    // 清理旧数据（超过指定天数的消息）
     cleanOldMessages(days = 30) {
         return new Promise((resolve, reject) => {
             this.db.run(
@@ -332,14 +295,12 @@ class Database {
             );
         });
     }
-
-    // 关闭数据库连接
     close() {
         return new Promise((resolve, reject) => {
             this.db.close((err) => {
                 if (err) reject(err);
                 else {
-                    console.log('✅ 数据库连接已关闭');
+                    console.log('数据库连接已关闭');
                     resolve();
                 }
             });

@@ -1,5 +1,8 @@
 let ws = null;
 let nickname = 'Anonymous';
+let heartbeatInterval = null;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 5;
 
 const loginScreen = document.getElementById('loginScreen');
 const chatScreen = document.getElementById('chatScreen');
@@ -12,10 +15,34 @@ const sendBtn = document.getElementById('sendBtn');
 const onlineCount = document.getElementById('onlineCount');
 const connectionStatus = document.getElementById('connectionStatus');
 const errorMsg = document.getElementById('errorMsg');
+const disconnectBtn = document.getElementById('disconnectBtn');
+const userListPanel = document.getElementById('userListPanel');
+const userListContainer = document.getElementById('userListContainer');
+const toggleUserListBtn = document.getElementById('toggleUserListBtn');
 
 joinBtn.addEventListener('click', connectToServer);
 nicknameInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') connectToServer();
+});
+
+disconnectBtn.addEventListener('click', () => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        // 发送断开消息
+        ws.send(JSON.stringify({ type: 'disconnect' }));
+        stopHeartbeat();
+        ws.close();
+        
+        // 重置界面
+        chatScreen.classList.remove('active');
+        loginScreen.classList.remove('hidden');
+        messagesContainer.innerHTML = '';
+        joinBtn.disabled = false;
+        joinBtn.textContent = '加入聊天室';
+    }
+});
+
+toggleUserListBtn.addEventListener('click', () => {
+    userListPanel.classList.toggle('show');
 });
 
 function connectToServer() {
@@ -38,6 +65,7 @@ function connectToServer() {
             console.log('WebSocket 连接成功');
             connectionStatus.textContent = '已连接';
             connectionStatus.className = 'connection-status connected';
+            reconnectAttempts = 0;
             
             ws.send(JSON.stringify({
                 type: 'join',
@@ -47,6 +75,9 @@ function connectToServer() {
             loginScreen.classList.add('hidden');
             chatScreen.classList.add('active');
             messageInput.focus();
+            
+            // 启动心跳
+            startHeartbeat();
         };
 
         ws.onmessage = (event) => {
@@ -59,6 +90,7 @@ function connectToServer() {
             showError('连接失败，请检查服务器地址是否正确');
             joinBtn.disabled = false;
             joinBtn.textContent = '加入聊天室';
+            stopHeartbeat();
         };
 
         ws.onclose = () => {
@@ -68,13 +100,56 @@ function connectToServer() {
             sendBtn.disabled = true;
             messageInput.disabled = true;
             addSystemMessage('连接已断开');
+            stopHeartbeat();
+            
+            // 尝试重连
+            attemptReconnect();
         };
 
     } catch (error) {
         showError('连接失败: ' + error.message);
         joinBtn.disabled = false;
         joinBtn.textContent = '加入聊天室';
+        stopHeartbeat();
     }
+}
+
+// ========== 保活机制 ==========
+function startHeartbeat() {
+    stopHeartbeat(); // 确保没有重复的定时器
+    
+    heartbeatInterval = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'heartbeat' }));
+            console.log('发送心跳');
+        }
+    }, 25000); // 每25秒发送一次心跳
+}
+
+function stopHeartbeat() {
+    if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = null;
+    }
+}
+
+// ========== 重连机制 ==========
+function attemptReconnect() {
+    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        addSystemMessage(`重连失败，已尝试 ${MAX_RECONNECT_ATTEMPTS} 次`);
+        return;
+    }
+    
+    reconnectAttempts++;
+    const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+    
+    addSystemMessage(`${delay/1000} 秒后尝试重连 (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
+    
+    setTimeout(() => {
+        if (ws.readyState === WebSocket.CLOSED) {
+            connectToServer();
+        }
+    }, delay);
 }
 
 function showError(message) {
@@ -90,7 +165,54 @@ function handleMessage(data) {
         }
     } else if (data.type === 'message') {
         addUserMessage(data.nickname, data.message, data.timestamp);
+    } else if (data.type === 'userlist') {
+        updateUserList(data.users);
+        onlineCount.textContent = `👥 ${data.count} 人在线`;
+    } else if (data.type === 'history') {
+        // 加载历史消息
+        addSystemMessage('📜 加载历史消息...');
+        data.messages.forEach(msg => {
+            if (msg.message_type === 'system') {
+                addSystemMessage(msg.message);
+            } else {
+                addUserMessage(msg.nickname, msg.message, msg.time);
+            }
+        });
+        addSystemMessage('📜 历史消息加载完成');
+    } else if (data.type === 'stats') {
+        // 显示统计信息
+        console.log('统计信息:', data.data);
     }
+}
+
+function updateUserList(users) {
+    userListContainer.innerHTML = '';
+    
+    if (users.length === 0) {
+        userListContainer.innerHTML = '<div class="no-users">暂无在线用户</div>';
+        return;
+    }
+    
+    users.forEach(user => {
+        const userDiv = document.createElement('div');
+        userDiv.className = 'user-item';
+        
+        const joinTime = new Date(user.joinTime);
+        const timeStr = joinTime.toLocaleTimeString('zh-CN');
+        
+        userDiv.innerHTML = `
+            <div class="user-item-header">
+                <span class="user-nickname">👤 ${escapeHtml(user.nickname)}</span>
+                <span class="user-id">#${user.id}</span>
+            </div>
+            <div class="user-info">
+                <div class="user-ip">🌐 ${escapeHtml(user.ip)}</div>
+                <div class="user-time">🕐 ${timeStr}</div>
+            </div>
+        `;
+        
+        userListContainer.appendChild(userDiv);
+    });
 }
 
 function addSystemMessage(text) {
@@ -140,8 +262,11 @@ function escapeHtml(text) {
     div.textContent = text;
     return div.innerHTML;
 }
-setInterval(() => {
-  if (socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify({ type: "ping" }));
-  }
-}, 30000);
+
+// 页面卸载时清理
+window.addEventListener('beforeunload', () => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'disconnect' }));
+        stopHeartbeat();
+    }
+});

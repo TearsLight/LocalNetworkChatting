@@ -2,7 +2,10 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const Database = require('./database');
 
+// 初始化数据库
+const db = new Database('./chat.db');
 
 const clients = new Map();
 let clientIdCounter = 0;
@@ -20,6 +23,28 @@ const mimeTypes = {
 };
 
 const ROOT_DIR = path.resolve(__dirname);
+
+// ========== 保活检测 ==========
+const HEARTBEAT_INTERVAL = 30000;
+const HEARTBEAT_TIMEOUT = 60000;
+
+function startHeartbeat(client) {
+    client.heartbeatInterval = setInterval(() => {
+        if (!client.isAlive) {
+            console.log(`[${getTime()}] Client ${client.id} (${client.nickname}) heartbeat timeout`);
+            clearInterval(client.heartbeatInterval);
+            client.socket.end();
+            return;
+        }
+        
+        client.isAlive = false;
+        try {
+            client.socket.write(Buffer.from([0x89, 0x00]));
+        } catch (err) {
+            clearInterval(client.heartbeatInterval);
+        }
+    }, HEARTBEAT_INTERVAL);
+}
 
 // ========== WebSocket 升级 ==========
 function handleWebSocketUpgrade(req, socket) {
@@ -45,15 +70,30 @@ function handleWebSocketUpgrade(req, socket) {
     socket.write(headers);
 
     const clientId = ++clientIdCounter;
+    
+    const clientIP = req.headers['x-forwarded-for']?.split(',')[0].trim() 
+                     || req.socket.remoteAddress 
+                     || 'unknown';
+    
     const client = {
         id: clientId,
         socket,
         nickname: 'Anonymous',
-        isAlive: true
+        ip: clientIP,
+        joinTime: new Date(),
+        isAlive: true,
+        heartbeatInterval: null,
+        userId: null,
+        sessionId: null
     };
 
     clients.set(clientId, client);
-    console.log(`[${getTime()}] Client ${clientId} connected (Online: ${clients.size})`);
+    console.log(`[${getTime()}] Client ${clientId} connected from ${clientIP} (Online: ${clients.size})`);
+
+    // 记录系统日志
+    db.logSystem('connection', `Client ${clientId} connected`, clientIP).catch(console.error);
+
+    startHeartbeat(client);
 
     let buffer = Buffer.alloc(0);
 
@@ -65,12 +105,18 @@ function handleWebSocketUpgrade(req, socket) {
             buffer = buffer.slice(frame.length);
 
             if (frame.opcode === 0x8) {
+                console.log(`[${getTime()}] Client ${clientId} (${client.nickname}) sent close frame`);
                 socket.end();
                 return;
             }
 
             if (frame.opcode === 0x9) {
                 socket.write(Buffer.from([0x8A, 0x00]));
+                client.isAlive = true;
+                continue;
+            }
+
+            if (frame.opcode === 0xA) {
                 client.isAlive = true;
                 continue;
             }
@@ -96,17 +142,38 @@ function handleWebSocketUpgrade(req, socket) {
     });
 }
 
-function removeClient(client) {
+async function removeClient(client) {
     if (!clients.has(client.id)) return;
+    
+    if (client.heartbeatInterval) {
+        clearInterval(client.heartbeatInterval);
+    }
+    
     const nickname = client.nickname;
+    
+    // 结束数据库会话
+    if (client.sessionId) {
+        try {
+            await db.endSession(client.sessionId);
+        } catch (err) {
+            console.error('结束会话失败:', err);
+        }
+    }
+    
+    // 记录系统日志
+    db.logSystem('disconnection', `${nickname} disconnected`, client.ip).catch(console.error);
+    
     clients.delete(client.id);
     console.log(`[${getTime()}] ${nickname} disconnected (Online: ${clients.size})`);
+    
     broadcast({
         type: 'system',
         message: `${nickname} left the chat`,
         timestamp: getTime(),
         online_count: clients.size
     });
+    
+    broadcastUserList();
 }
 
 function parseFrame(buffer) {
@@ -176,26 +243,100 @@ function createFrame(data) {
     return frame;
 }
 
-function handleMessage(client, data) {
+async function handleMessage(client, data) {
     if (data.type === 'join') {
         client.nickname = (data.nickname || '').trim() || 'Anonymous';
-        console.log(`[${getTime()}] ${client.nickname} joined (Online: ${clients.size})`);
+        console.log(`[${getTime()}] ${client.nickname} (${client.ip}) joined (Online: ${clients.size})`);
+        
+        try {
+            // 查找或创建用户
+            const user = await db.findOrCreateUser(client.nickname, client.ip);
+            client.userId = user.id;
+            
+            // 创建新会话
+            client.sessionId = await db.createSession(user.id, client.nickname, client.ip);
+            
+            // 保存系统消息到数据库
+            await db.saveMessage(
+                client.sessionId,
+                'System',
+                'system',
+                `${client.nickname} joined the chat`,
+                'system'
+            );
+        } catch (err) {
+            console.error('保存用户信息失败:', err);
+        }
+        
         broadcast({
             type: 'system',
             message: `${client.nickname} joined the chat`,
             timestamp: getTime(),
             online_count: clients.size
         });
+        
+        // 发送历史消息给新用户
+        try {
+            const history = await db.getRecentMessages(20);
+            const historyFrame = createFrame(JSON.stringify({
+                type: 'history',
+                messages: history
+            }));
+            client.socket.write(historyFrame);
+        } catch (err) {
+            console.error('获取历史消息失败:', err);
+        }
+        
+        broadcastUserList();
+        
     } else if (data.type === 'message') {
         const content = (data.message || '').trim();
         if (content) {
             console.log(`[${getTime()}] ${client.nickname}: ${content}`);
+            
+            // 保存消息到数据库
+            try {
+                await db.saveMessage(
+                    client.sessionId,
+                    client.nickname,
+                    client.ip,
+                    content,
+                    'user'
+                );
+                
+                // 更新用户消息计数
+                if (client.userId) {
+                    await db.incrementUserMessages(client.userId);
+                }
+            } catch (err) {
+                console.error('保存消息失败:', err);
+            }
+            
             broadcast({
                 type: 'message',
                 nickname: client.nickname,
                 message: content,
                 timestamp: getTime()
             });
+        }
+    } else if (data.type === 'heartbeat') {
+        client.isAlive = true;
+    } else if (data.type === 'disconnect') {
+        console.log(`[${getTime()}] ${client.nickname} requested disconnect`);
+        client.socket.end();
+    } else if (data.type === 'get_stats') {
+        // 获取统计信息
+        try {
+            const stats = await db.getStatistics();
+            const topUsers = await db.getTopUsers(5);
+            
+            const statsFrame = createFrame(JSON.stringify({
+                type: 'stats',
+                data: { ...stats, topUsers }
+            }));
+            client.socket.write(statsFrame);
+        } catch (err) {
+            console.error('获取统计信息失败:', err);
         }
     }
 }
@@ -213,6 +354,21 @@ function broadcast(data) {
             clients.delete(client.id);
         }
     }
+}
+
+function broadcastUserList() {
+    const userList = Array.from(clients.values()).map(client => ({
+        id: client.id,
+        nickname: client.nickname,
+        ip: client.ip,
+        joinTime: client.joinTime.toISOString()
+    }));
+    
+    broadcast({
+        type: 'userlist',
+        users: userList,
+        count: clients.size
+    });
 }
 
 function getTime() {
@@ -246,8 +402,55 @@ function serveStaticFile(req, res, filePath) {
     });
 }
 
+// ========== HTTP API 端点 ==========
+async function handleApiRequest(req, res) {
+    const url = req.url;
+    
+    // 设置 CORS
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Content-Type', 'application/json');
+    
+    try {
+        if (url === '/api/stats') {
+            const stats = await db.getStatistics();
+            const topUsers = await db.getTopUsers(10);
+            res.writeHead(200);
+            res.end(JSON.stringify({ success: true, data: { ...stats, topUsers } }));
+            
+        } else if (url.startsWith('/api/messages?')) {
+            const params = new URLSearchParams(url.split('?')[1]);
+            const limit = parseInt(params.get('limit')) || 50;
+            const messages = await db.getRecentMessages(limit);
+            res.writeHead(200);
+            res.end(JSON.stringify({ success: true, data: messages }));
+            
+        } else if (url.startsWith('/api/search?')) {
+            const params = new URLSearchParams(url.split('?')[1]);
+            const keyword = params.get('keyword') || '';
+            const messages = await db.searchMessages(keyword);
+            res.writeHead(200);
+            res.end(JSON.stringify({ success: true, data: messages }));
+            
+        } else {
+            res.writeHead(404);
+            res.end(JSON.stringify({ success: false, error: 'API endpoint not found' }));
+        }
+    } catch (err) {
+        console.error('API Error:', err);
+        res.writeHead(500);
+        res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+}
+
 // ========== HTTP ==========
 const server = http.createServer((req, res) => {
+    // API 路由
+    if (req.url.startsWith('/api/')) {
+        handleApiRequest(req, res);
+        return;
+    }
+    
+    // 静态文件
     const reqPath = decodeURI(req.url.split('?')[0]);
     let filePath = path.join(ROOT_DIR, reqPath);
     if (reqPath === '/' || reqPath === '') filePath = path.join(ROOT_DIR, 'chat.html');
@@ -256,28 +459,12 @@ const server = http.createServer((req, res) => {
 
 server.on('upgrade', handleWebSocketUpgrade);
 
-// 心跳检测（每 30 秒检查一次）
-setInterval(() => {
-    for (const client of clients.values()) {
-        if (!client.isAlive) {
-            console.log(`[${getTime()}] Client ${client.id} timeout`);
-            client.socket.end();
-            clients.delete(client.id);
-        } else {
-            client.isAlive = false;
-            try {
-                client.socket.write(Buffer.from([0x89, 0x00])); // ping
-            } catch {}
-        }
-    }
-}, 30000);
-
 const PORT = 9090;
 const HOST = '0.0.0.0';
 
 server.listen(PORT, HOST, () => {
     console.log('='.repeat(50));
-    console.log('Enhanced WebSocket Chat Server Started');
+    console.log('Enhanced WebSocket Chat Server with Database');
     console.log('='.repeat(50));
     console.log(`HTTP Server: http://${HOST}:${PORT}`);
     console.log(`WebSocket:  ws://${HOST}:${PORT}`);
@@ -288,11 +475,28 @@ server.listen(PORT, HOST, () => {
     console.log(`  - /js/script.js`);
     console.log(`  - /assets/backgroundVideo.mp4`);
     console.log('='.repeat(50));
+    console.log('API Endpoints:');
+    console.log(`  - GET /api/stats`);
+    console.log(`  - GET /api/messages?limit=50`);
+    console.log(`  - GET /api/search?keyword=xxx`);
+    console.log('='.repeat(50));
     console.log('Waiting for connections...\n');
 });
 
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
     console.log('\n\nShutting down server...');
+    
+    // 关闭所有客户端连接
+    for (const client of clients.values()) {
+        if (client.sessionId) {
+            await db.endSession(client.sessionId).catch(console.error);
+        }
+        client.socket.end();
+    }
+    
+    // 关闭数据库
+    await db.close();
+    
     server.close();
     console.log('Server closed');
     process.exit(0);

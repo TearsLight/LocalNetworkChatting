@@ -1,40 +1,35 @@
-# 匿名实时聊天室项目简介
-
-本项目是一个基于 WebSocket 协议的**匿名实时聊天室**，支持多用户在线交流、消息实时推送，并提供了精美的前端界面和完整的前后端交互逻辑。
-
-
 ## 核心功能
-- **匿名聊天**：用户无需注册，输入昵称即可参与（默认“Anonymous”）。
+- **匿名聊天**：输入昵称即可参与（默认“Anonymous”）。
 - **实时消息**：基于 WebSocket 实现全双工通信，消息发送后所有在线用户即时可见。
 - **多端兼容**：前端采用响应式设计，支持 PC、平板和手机端访问。
-- **静态资源托管**：服务端可直接托管 HTML、CSS、JavaScript 和视频等静态资源，部署简单。
+
 
 
 ## 技术栈
-- **前端**：HTML5 + CSS3 + JavaScript（原生 API，无框架依赖）。
-- **后端**：Node.js + 原生 WebSocket 协议（手动实现握手和帧解析）。
-- **通信协议**：WebSocket（长连接，保证消息实时性）。
+- **前端**：HTML5 + CSS3 + JavaScript。
+- **后端**：Node.js + 原生 WebSocket 协议。
+- **通信协议**：WebSocket。
 
 
 ## 项目结构
 ```
 chatroom/
-├── assets/           # 静态资源
+├── assets/
 │   └── backgroundVideo.mp4
-├── css/              # 样式文件
+├── css/
 │   └── style.css
-├── js/               # 前端逻辑
+├── js/
 │   └── script.js
-├── chat.html         # 聊天室主页面
-├── package.json      # 依赖配置
-└── server.js         # 服务端
+├── chat.html
+├── package.json
+└── server.js
 ```
 
 
-## 部署与运行
+## 项目部署
 1. 安装依赖：`npm install`。
 2. 启动服务：`node server.js`。
-3. 访问聊天室：浏览器打开 `http://服务器IP:9090` 即可参与聊天。
+3. 访问聊天室：浏览器打开 `http://服务器IP:9090`。
 
 
 ## 应用场景

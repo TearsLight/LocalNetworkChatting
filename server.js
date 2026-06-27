@@ -6,19 +6,28 @@ const Database = require('./database');
 const db = new Database('./chat.db');
 const clients = new Map();
 let clientIdCounter = 0;
+
+const ROOT_DIR = path.resolve(__dirname);
+
+// Detect production mode: Vue SPA built to client/dist/
+const SPA_DIR = path.join(ROOT_DIR, 'client', 'dist');
+const IS_PRODUCTION = fs.existsSync(path.join(SPA_DIR, 'index.html'));
+
 const mimeTypes = {
     '.html': 'text/html',
     '.css': 'text/css',
     '.js': 'text/javascript',
+    '.mjs': 'text/javascript',
     '.json': 'application/json',
     '.png': 'image/png',
     '.jpg': 'image/jpeg',
     '.gif': 'image/gif',
     '.ico': 'image/x-icon',
-    '.mp4': 'video/mp4'
+    '.mp4': 'video/mp4',
+    '.svg': 'image/svg+xml',
+    '.woff': 'font/woff',
+    '.woff2': 'font/woff2',
 };
-
-const ROOT_DIR = path.resolve(__dirname);
 
 // ========== 保活检测 ==========
 const HEARTBEAT_INTERVAL = 30000;
@@ -32,7 +41,7 @@ function startHeartbeat(client) {
             client.socket.end();
             return;
         }
-        
+
         client.isAlive = false;
         try {
             client.socket.write(Buffer.from([0x89, 0x00]));
@@ -66,11 +75,11 @@ function handleWebSocketUpgrade(req, socket) {
     socket.write(headers);
 
     const clientId = ++clientIdCounter;
-    
-    const clientIP = req.headers['x-forwarded-for']?.split(',')[0].trim() 
-                     || req.socket.remoteAddress 
+
+    const clientIP = req.headers['x-forwarded-for']?.split(',')[0].trim()
+                     || req.socket.remoteAddress
                      || 'unknown';
-    
+
     const client = {
         id: clientId,
         socket,
@@ -85,7 +94,7 @@ function handleWebSocketUpgrade(req, socket) {
 
     clients.set(clientId, client);
     console.log(`[${getTime()}] Client ${clientId} connected from ${clientIP} (Online: ${clients.size})`);
-    db.logSystem('connection', `Client ${clientId} connected`, clientIP).catch(console.error);
+    db.logSystem('connection', `Client ${clientId} connected`, clientIP);
 
     startHeartbeat(client);
 
@@ -136,35 +145,35 @@ function handleWebSocketUpgrade(req, socket) {
     });
 }
 
-async function removeClient(client) {
+function removeClient(client) {
     if (!clients.has(client.id)) return;
-    
+
     if (client.heartbeatInterval) {
         clearInterval(client.heartbeatInterval);
     }
-    
+
     const nickname = client.nickname;
-    
+
     if (client.sessionId) {
         try {
-            await db.endSession(client.sessionId);
+            db.endSession(client.sessionId);
         } catch (err) {
             console.error('结束会话失败:', err);
         }
     }
-    
-    db.logSystem('disconnection', `${nickname} disconnected`, client.ip).catch(console.error);
-    
+
+    db.logSystem('disconnection', `${nickname} disconnected`, client.ip);
+
     clients.delete(client.id);
     console.log(`[${getTime()}] ${nickname} disconnected (Online: ${clients.size})`);
-    
+
     broadcast({
         type: 'system',
         message: `${nickname} left the chat`,
         timestamp: getTime(),
         online_count: clients.size
     });
-    
+
     broadcastUserList();
 }
 
@@ -235,17 +244,17 @@ function createFrame(data) {
     return frame;
 }
 
-async function handleMessage(client, data) {
+function handleMessage(client, data) {
     if (data.type === 'join') {
         client.nickname = (data.nickname || '').trim() || 'Anonymous';
         console.log(`[${getTime()}] ${client.nickname} (${client.ip}) joined (Online: ${clients.size})`);
-        
+
         try {
-            const user = await db.findOrCreateUser(client.nickname, client.ip);
+            const user = db.findOrCreateUser(client.nickname, client.ip);
             client.userId = user.id;
-            
-            client.sessionId = await db.createSession(user.id, client.nickname, client.ip);
-            await db.saveMessage(
+
+            client.sessionId = db.createSession(user.id, client.nickname, client.ip);
+            db.saveMessage(
                 client.sessionId,
                 'System',
                 'system',
@@ -255,16 +264,16 @@ async function handleMessage(client, data) {
         } catch (err) {
             console.error('保存用户信息失败:', err);
         }
-        
+
         broadcast({
             type: 'system',
             message: `${client.nickname} joined the chat`,
             timestamp: getTime(),
             online_count: clients.size
         });
-        
+
         try {
-            const history = await db.getRecentMessages(20);
+            const history = db.getRecentMessages(20);
             const historyFrame = createFrame(JSON.stringify({
                 type: 'history',
                 messages: history
@@ -273,30 +282,30 @@ async function handleMessage(client, data) {
         } catch (err) {
             console.error('获取历史消息失败:', err);
         }
-        
+
         broadcastUserList();
-        
+
     } else if (data.type === 'message') {
         const content = (data.message || '').trim();
         if (content) {
             console.log(`[${getTime()}] ${client.nickname}: ${content}`);
-            
+
             try {
-                await db.saveMessage(
+                db.saveMessage(
                     client.sessionId,
                     client.nickname,
                     client.ip,
                     content,
                     'user'
                 );
-                
+
                 if (client.userId) {
-                    await db.incrementUserMessages(client.userId);
+                    db.incrementUserMessages(client.userId);
                 }
             } catch (err) {
                 console.error('保存消息失败:', err);
             }
-            
+
             broadcast({
                 type: 'message',
                 nickname: client.nickname,
@@ -311,9 +320,9 @@ async function handleMessage(client, data) {
         client.socket.end();
     } else if (data.type === 'get_stats') {
         try {
-            const stats = await db.getStatistics();
-            const topUsers = await db.getTopUsers(5);
-            
+            const stats = db.getStatistics();
+            const topUsers = db.getTopUsers(5);
+
             const statsFrame = createFrame(JSON.stringify({
                 type: 'stats',
                 data: { ...stats, topUsers }
@@ -347,7 +356,7 @@ function broadcastUserList() {
         ip: client.ip,
         joinTime: client.joinTime.toISOString()
     }));
-    
+
     broadcast({
         type: 'userlist',
         users: userList,
@@ -387,33 +396,33 @@ function serveStaticFile(req, res, filePath) {
 }
 
 // ========== HTTP API ==========
-async function handleApiRequest(req, res) {
+function handleApiRequest(req, res) {
     const url = req.url;
-    
+
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Content-Type', 'application/json');
-    
+
     try {
         if (url === '/api/stats') {
-            const stats = await db.getStatistics();
-            const topUsers = await db.getTopUsers(10);
+            const stats = db.getStatistics();
+            const topUsers = db.getTopUsers(10);
             res.writeHead(200);
             res.end(JSON.stringify({ success: true, data: { ...stats, topUsers } }));
-            
+
         } else if (url.startsWith('/api/messages?')) {
             const params = new URLSearchParams(url.split('?')[1]);
             const limit = parseInt(params.get('limit')) || 50;
-            const messages = await db.getRecentMessages(limit);
+            const messages = db.getRecentMessages(limit);
             res.writeHead(200);
             res.end(JSON.stringify({ success: true, data: messages }));
-            
+
         } else if (url.startsWith('/api/search?')) {
             const params = new URLSearchParams(url.split('?')[1]);
             const keyword = params.get('keyword') || '';
-            const messages = await db.searchMessages(keyword);
+            const messages = db.searchMessages(keyword);
             res.writeHead(200);
             res.end(JSON.stringify({ success: true, data: messages }));
-            
+
         } else {
             res.writeHead(404);
             res.end(JSON.stringify({ success: false, error: 'API endpoint not found' }));
@@ -432,11 +441,32 @@ const server = http.createServer((req, res) => {
         handleApiRequest(req, res);
         return;
     }
-    
-    // 静态文件
+
     const reqPath = decodeURI(req.url.split('?')[0]);
-    let filePath = path.join(ROOT_DIR, reqPath);
-    if (reqPath === '/' || reqPath === '') filePath = path.join(ROOT_DIR, 'chat.html');
+
+    // In production mode, serve from client/dist/ with SPA fallback
+    if (IS_PRODUCTION) {
+        const distPath = path.join(SPA_DIR, reqPath === '/' ? 'index.html' : reqPath);
+
+        // Try client/dist/ first
+        fs.access(distPath, fs.constants.F_OK, (err) => {
+            if (!err) {
+                // File exists in dist — serve it
+                serveStaticFile(req, res, distPath);
+            } else if (reqPath.startsWith('/assets/')) {
+                // Fallback: try root assets/ (for background.png, favicon.ico, etc.)
+                const rootAssetPath = path.join(ROOT_DIR, reqPath);
+                serveStaticFile(req, res, rootAssetPath);
+            } else {
+                // SPA fallback: serve index.html for client-side routing
+                serveStaticFile(req, res, path.join(SPA_DIR, 'index.html'));
+            }
+        });
+        return;
+    }
+
+    // Development mode: simple static file serving (Vite handles SPA)
+    const filePath = path.join(ROOT_DIR, reqPath);
     serveStaticFile(req, res, filePath);
 });
 
@@ -451,27 +481,31 @@ server.listen(PORT, HOST, () => {
     console.log('='.repeat(50));
     console.log(`HTTP Server: http://${HOST}:${PORT}`);
     console.log(`WebSocket:  ws://${HOST}:${PORT}`);
+    console.log(`Mode: ${IS_PRODUCTION ? 'PRODUCTION (SPA)' : 'DEVELOPMENT'}`);
     console.log('='.repeat(50));
     console.log('API Endpoints:');
     console.log(`  - GET /api/stats`);
     console.log(`  - GET /api/messages?limit=50`);
     console.log(`  - GET /api/search?keyword=xxx`);
+    if (IS_PRODUCTION) {
+        console.log(`  - Chat:   http://localhost:${PORT}/`);
+    }
     console.log('='.repeat(50));
     console.log('Waiting for connections...\n');
 });
 
-process.on('SIGINT', async () => {
+process.on('SIGINT', () => {
     console.log('\n\nShutting down server...');
-    
+
     for (const client of clients.values()) {
         if (client.sessionId) {
-            await db.endSession(client.sessionId).catch(console.error);
+            try { db.endSession(client.sessionId); } catch {}
         }
         client.socket.end();
     }
-    
-    await db.close();
-    
+
+    db.close();
+
     server.close();
     console.log('Server closed');
     process.exit(0);
